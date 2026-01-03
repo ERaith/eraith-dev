@@ -1,18 +1,13 @@
 # ============================================================================
-# AI TEST GENERATION WORKFLOW (Caller - uses reusable workflow)
+# AI TEST GENERATION WORKFLOW
 # ============================================================================
 #
-# This minimal workflow calls the reusable workflow from ai-test-agents-lab.
-# All logic lives in the central repo - updates there automatically apply here.
-#
-# Flow (label-based):
-#   1. Add label "generate-tests" → Phase 1: Generate Plan
-#   2. Add label "approve-plan"   → Phase 2: Generate Scenarios
-#   3. Add label "approve-cases"  → Phase 3: Generate Code (committed to PR)
+# Calls the reusable workflow from ai-test-agents-lab.
+# All logic lives there - this is just the trigger.
 #
 # Setup:
 #   1. Add secrets: ANTHROPIC_API_KEY, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY
-#   2. Add variable: S3_BUCKET (and optionally AWS_REGION)
+#   2. Add variable: S3_BUCKET
 #   3. Create labels: generate-tests, approve-plan, approve-cases, tests-generated
 #
 # ============================================================================
@@ -28,11 +23,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  # ==========================================================================
-  # Phase 1: Generate Test Plan
-  # ==========================================================================
   phase-1-plan:
-    name: "📝 Phase 1: Generate Test Plan"
     if: github.event.label.name == 'generate-tests'
     uses: ERaith/ai-test-agents-lab/.github/workflows/test-generation-reusable.yml@main
     with:
@@ -44,57 +35,16 @@ jobs:
         ${{ github.event.pull_request.body }}
       s3_bucket: ${{ vars.S3_BUCKET }}
       s3_prefix: ${{ github.repository }}/pr-${{ github.event.pull_request.number }}
-      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      caller_repo: ${{ github.repository }}
+      pr_number: ${{ github.event.pull_request.number }}
+      trigger_label: generate-tests
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      CALLER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  post-plan:
-    name: "📝 Post Plan Comment"
-    needs: phase-1-plan
-    runs-on: ubuntu-latest
-    if: github.event.label.name == 'generate-tests'
-    steps:
-      - name: Post plan comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const plan = `${{ needs.phase-1-plan.outputs.test_plan }}`;
-            const content = plan.length > 60000 ? plan.substring(0, 60000) + '\n...(truncated)' : plan;
-
-            const body = `## 📝 Phase 1: Test Plan
-
-            <details>
-            <summary>Click to expand</summary>
-
-            ${content}
-
-            </details>
-
-            ---
-            **Next:** Add label \`approve-plan\` to continue to Phase 2`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              body: body
-            });
-
-            // Remove trigger label
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              name: 'generate-tests'
-            }).catch(() => {});
-
-  # ==========================================================================
-  # Phase 2: Generate Gherkin Scenarios
-  # ==========================================================================
   phase-2-cases:
-    name: "🥒 Phase 2: Generate Scenarios"
     if: github.event.label.name == 'approve-plan'
     uses: ERaith/ai-test-agents-lab/.github/workflows/test-generation-reusable.yml@main
     with:
@@ -106,59 +56,16 @@ jobs:
         ${{ github.event.pull_request.body }}
       s3_bucket: ${{ vars.S3_BUCKET }}
       s3_prefix: ${{ github.repository }}/pr-${{ github.event.pull_request.number }}
-      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      caller_repo: ${{ github.repository }}
+      pr_number: ${{ github.event.pull_request.number }}
+      trigger_label: approve-plan
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      CALLER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  post-cases:
-    name: "🥒 Post Scenarios Comment"
-    needs: phase-2-cases
-    runs-on: ubuntu-latest
-    if: github.event.label.name == 'approve-plan'
-    steps:
-      - name: Post scenarios comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const scenarios = `${{ needs.phase-2-cases.outputs.scenarios }}`;
-            const content = scenarios.length > 60000 ? scenarios.substring(0, 60000) + '\n...(truncated)' : scenarios;
-
-            const body = `## 🥒 Phase 2: Gherkin Scenarios
-
-            <details>
-            <summary>Click to expand</summary>
-
-            \`\`\`gherkin
-            ${content}
-            \`\`\`
-
-            </details>
-
-            ---
-            **Next:** Add label \`approve-cases\` to continue to Phase 3`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              body: body
-            });
-
-            // Remove trigger label
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              name: 'approve-plan'
-            }).catch(() => {});
-
-  # ==========================================================================
-  # Phase 3: Generate Test Code
-  # ==========================================================================
   phase-3-code:
-    name: "💻 Phase 3: Generate Tests"
     if: github.event.label.name == 'approve-cases'
     uses: ERaith/ai-test-agents-lab/.github/workflows/test-generation-reusable.yml@main
     with:
@@ -170,98 +77,12 @@ jobs:
         ${{ github.event.pull_request.body }}
       s3_bucket: ${{ vars.S3_BUCKET }}
       s3_prefix: ${{ github.repository }}/pr-${{ github.event.pull_request.number }}
-      aws_region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      caller_repo: ${{ github.repository }}
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_head_ref: ${{ github.head_ref }}
+      trigger_label: approve-cases
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-
-  commit-code:
-    name: "💻 Commit Test Code"
-    needs: phase-3-code
-    runs-on: ubuntu-latest
-    if: github.event.label.name == 'approve-cases'
-    steps:
-      - name: Checkout PR branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download test artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: test-artifacts-pr-${{ github.event.pull_request.number }}
-          path: ./downloaded-artifacts
-
-      - name: Copy test files
-        run: |
-          mkdir -p playwright/tests
-
-          # Copy any generated test files
-          if [ -d "downloaded-artifacts/playwright/tests" ]; then
-            cp -r downloaded-artifacts/playwright/tests/* playwright/tests/ 2>/dev/null || true
-          fi
-
-          # Also try the test-artifacts location
-          find downloaded-artifacts -name "*.spec.ts" -exec cp {} playwright/tests/ \; 2>/dev/null || true
-
-          echo "Generated test files:"
-          ls -la playwright/tests/ || echo "No test files found"
-
-      - name: Commit test code
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          if [ -n "$(ls -A playwright/tests/ 2>/dev/null)" ]; then
-            git add playwright/
-            git commit -m "🤖 Add generated Playwright tests for PR #${{ github.event.pull_request.number }}" || echo "Nothing to commit"
-            git push
-          else
-            echo "No test files to commit"
-          fi
-
-      - name: Post completion comment
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const testCode = `${{ needs.phase-3-code.outputs.test_code }}`;
-            const preview = testCode.split('\n').slice(0, 50).join('\n');
-
-            const body = `## 💻 Phase 3: Test Code
-
-            ✅ **All phases complete!** Test code committed to this PR.
-
-            <details>
-            <summary>Click to expand code</summary>
-
-            \`\`\`typescript
-            ${preview}
-            \`\`\`
-
-            </details>
-
-            **Next:** Pull changes, review, and merge!`;
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              body: body
-            });
-
-            // Remove trigger label and add completion label
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              name: 'approve-cases'
-            }).catch(() => {});
-
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ github.event.pull_request.number }},
-              labels: ['tests-generated']
-            });
+      CALLER_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
